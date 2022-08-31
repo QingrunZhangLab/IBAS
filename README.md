@@ -1,2 +1,2 @@
-# inTWAS
-INteraction mediated Transcriptome Wide Association Study
+# IBAS
+Interaction Bridged Association Study
