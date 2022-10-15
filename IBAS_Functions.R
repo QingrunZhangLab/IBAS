@@ -37,7 +37,7 @@ downloadPathways <- function(downloadLocation = "./PathwayData.csv"){
     pathways <- rbindlist(list(pathways, data.table(PathwayID = query[[1]]$ENTRY,
                                                     PathwayClass = query[[1]]$CLASS,
                                                     PathwayName = query[[1]]$NAME,
-                                                    All_Genes = paste0(gene_names, collapse = ";"),
+                                                    AllGenes = paste0(gene_names, collapse = ";"),
                                                     MedianEdges = medianEdges)))
   }
   
@@ -51,13 +51,14 @@ downloadPathways <- function(downloadLocation = "./PathwayData.csv"){
   
 }
 
-pathwayLoader <- function(cacheLocation = "./PathwayData.csv", forceDownload = FALSE){
+pathwaysToGeneSets <- function(pathwayLocation = "./PathwayData.csv", geneSetLocation = "./GeneSets.csv"){
   
-  if(forceDownload | !file.exists(cacheLocation)){
-    downloadPathways(cacheLocation)
-  }
+  pathways <- fread(pathwayLocation)
   
-  return(fread(cacheLocation))
+  geneSets <- pathways[, c("PathwayID", "AllGenes", "MedianEdges")]
+  colnames(geneSets) <- c("GeneSet", "Genes", "Edges")
+  
+  fwrite(geneSets, geneSetLocation)
   
 }
 
@@ -69,44 +70,45 @@ pathwayLoader <- function(cacheLocation = "./PathwayData.csv", forceDownload = F
 # geneLookupTable <- gencode
 # outputFolder = "./ReducedPathways"
 # seed = 2222
-pathwayReducer <- function(exprData, sampleIDs, pathwayData, 
+geneSetReducer <- function(exprData, sampleIDs, geneSets, 
                            geneLookupTable = NULL, method = "tSNE", numDims = 2,
+                           edgeThreshold = 3,
                            outputFolder = "./ReducedPathways",
                            seed = 2222){
   
-  pathwayData <- pathwayData[MedianEdges >= 3]
+  geneSetData <- geneSets[MedianEdges >= edgeThreshold]
   
   if(!dir.exists(outputFolder)) dir.create(outputFolder, recursive = TRUE)
   
-  for(i in seq(1, nrow(pathwayData))){
-    pathwayName <- pathwayData$PathwayID[i]
-    pathwayGenes <- str_split(pathwayData$All_Genes[i], ";")[[1]]
+  for(i in seq(1, nrow(geneSetData))){
+    geneSetName <- geneSetData$GeneSet[i]
+    geneSetGenes <- str_split(geneSetData$Genes[i], ";")[[1]]
     
     if(!is.null(geneLookupTable)){
-      pathwayGenes <- geneLookupTable[[1]][geneLookupTable[[2]] %in% pathwayGenes]
+      geneSetGenes <- geneLookupTable[[1]][geneLookupTable[[2]] %in% geneSetGenes]
     }
     
-    genesToSelect <- intersect(pathwayGenes, colnames(exprData))
+    genesToSelect <- intersect(geneSetGenes, colnames(exprData))
     
     if(length(genesToSelect)<1){
-      print(paste0("Insufficient genes for pathway ", pathwayName, ". Skipping reduction."))
+      print(paste0("Insufficient genes for geneset ", geneSetName, ". Skipping reduction."))
       next
     }
     
-    pathwayExprData <- as.matrix(exprData[, ..genesToSelect])
+    geneSetExprData <- as.matrix(exprData[, ..genesToSelect])
     
     if(tolower(method) == "tsne"){
       set.seed(seed)
-      pathwayReduced <- Rtsne(pathwayExprData, dims = numDims, perplexity = pathwayData$MedianEdges[i])$Y
+      geneSetReduced <- Rtsne(geneSetExprData, dims = numDims, perplexity = geneSetData$Edges[i])$Y
     }else if(tolower(method) == "umap"){
-      pathwayReduced <- umap(pathwayExprData, n_neighbors = pathwayData$MedianEdges[i], 
+      geneSetReduced <- umap(geneSetExprData, n_neighbors = geneSetData$Edges[i], 
                              n_components = numDims, random_state = seed)$layout
     }else{
       stop("No valid method specified!")
     }
     
-    pathwayReduced <- data.table(ID = sampleIDs, pathwayReduced)
-    fwrite(pathwayReduced, paste0(outputFolder, "/", method, "_", pathwayName, ".tsv"), sep = "\t")
+    geneSetReduced <- data.table(ID = sampleIDs, geneSetReduced)
+    fwrite(geneSetReduced, paste0(outputFolder, "/", method, "_", geneSetName, ".tsv"), sep = "\t")
     
   }
   
@@ -116,20 +118,20 @@ pathwayReducer <- function(exprData, sampleIDs, pathwayData,
 # pathwayData <- pathways
 # cisBP <- 1000000
 # outputFolder = "./SNPAvailability"
-snpAvailability <- function(gencode, pathwayData, cisBP = 1000000, 
+snpAvailability <- function(gencode, geneSets, cisBP = 1000000, 
                             outputFolder = "./SNPAvailability"){
   
   if(!dir.exists(outputFolder)) dir.create(outputFolder, recursive = TRUE)
   
-  for(i in 1:nrow(pathwayData)){
+  for(i in 1:nrow(geneSets)){
     
-    print(paste0("Currently working on ", pathwayData$PathwayID[i], " (", i, " of ", nrow(pathwayData), ")..."))
-    if(file.exists(paste0(outputFolder, "/", pathwayData$PathwayID[i], ".tsv"))){
-      print(paste0("Pathway ", pathwayData$PathwayID[i], " SNP file exists. Skipping..."))
+    print(paste0("Currently working on ", geneSets$GeneSet[i], " (", i, " of ", nrow(geneSets), ")..."))
+    if(file.exists(paste0(outputFolder, "/", geneSets$GeneSet[i], ".tsv"))){
+      print(paste0("Geneset ", geneSets$GeneSet[i], " SNP file exists. Skipping..."))
       next
     }
     
-    curr_genes <- str_split(pathwayData$All_Genes[i], ";")[[1]]
+    curr_genes <- str_split(geneSets$Genes[i], ";")[[1]]
     
     gene_details <- gencode[gencode$gene_name %in% curr_genes,]
     gene_details$start <- pmax(gene_details$start - cisBP, 0)
@@ -140,8 +142,8 @@ snpAvailability <- function(gencode, pathwayData, cisBP = 1000000,
     region_file <- region_file[, c(1,4)]
     colnames(region_file) <- c("CHR", "LOC")
     
-    print(paste0("Writing pathway ", pathwayData$PathwayID[i]))
-    fwrite(region_file, paste0(outputFolder, "/", pathwayData$PathwayID[i], ".tsv"), sep = "\t")
+    print(paste0("Writing geneset ", geneSets$GeneSet[i]))
+    fwrite(region_file, paste0(outputFolder, "/", geneSets$GeneSet[i], ".tsv"), sep = "\t")
   }
   
 }
