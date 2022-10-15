@@ -67,8 +67,8 @@ if (!require("disgenet2r")) install_bitbucket("ibi_group/disgenet2r")
 library(disgenet2r)
 
 disgenet_api_key <- get_disgenet_api_key(
-  email = "thalagalakossinnagep@ucalgary.ca", 
-  password = "e8wt3h35$")
+  email = "email", 
+  password = "password")
 Sys.setenv(DISGENET_API_KEY = disgenet_api_key)
 
 CUIs <- fread("DiseaseCUIs.tsv", header = FALSE)

@@ -76,7 +76,7 @@ geneSetReducer <- function(exprData, sampleIDs, geneSets,
                            outputFolder = "./ReducedPathways",
                            seed = 2222){
   
-  geneSetData <- geneSets[MedianEdges >= edgeThreshold]
+  geneSetData <- geneSets[Edges >= edgeThreshold]
   
   if(!dir.exists(outputFolder)) dir.create(outputFolder, recursive = TRUE)
   

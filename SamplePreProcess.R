@@ -32,7 +32,6 @@ geneSetReducer(exprData = expr.data, sampleIDs = sample.ids, geneSets = geneSets
                outputFolder = "./ReducedGeneSets", seed = 1234)
 
 
-
 gencode <- fread("../../Data/GTEx/gencode.v26.GRCh38.genes.gtf")
 mappings <- as.data.table(str_split(gencode$V9, ";", simplify = TRUE)[, c(1, 4)])
 colnames(mappings) <- c("gene_id", "gene_name")
