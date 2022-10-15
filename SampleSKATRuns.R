@@ -8,9 +8,9 @@ pacman::p_load(data.table,
 
 # Defining arguments to be parse from command line
 option_list <- list(
-  make_option(c("-P", "--pathway_availability_file"), action = "store", type = "character", 
-              default = "./PathwayData.csv",
-              help = "Location to load pathway availability summary. Default location is %default."),
+  make_option(c("-G", "--geneSets"), action = "store", type = "character", 
+              default = "./GeneSets.csv",
+              help = "Location to load gene set data. Default location is %default."),
   make_option(c("-g", "--genotype_data"), action = "store", type = "character", 
               default = "../WTCCC/T1D",
               help = "Prefix to bed, bim and fam files to test association. Default location is %default."),
@@ -31,12 +31,16 @@ option_list <- list(
               default = "D",
               help = "An indicator of the outcome type. 'C' for the continuous outcome 
               and 'D' for the dichotomous outcome. Default value is %default."),
+  make_option(c("-w", "--weight_type"), action = "store", type = "character", 
+              default = "b",
+              help = "An indicator of the type of weights to use. 'b' uses the betas of the regression while 
+              'p' uses the p-values. Default value is %default."),
   make_option(c("-t", "--temp_folder"), action = "store", type = "character", 
               default = "TEMP",
               help = "Folder in which to temporarily store SKAT files. Default location is %default."),
-  make_option(c("-i", "--pathway_index"), action="store", type = "numeric", 
+  make_option(c("-i", "--geneSet_index"), action="store", type = "numeric", 
               default="1",
-              help="Pathway index from Reference_PathwayWeights to process.")
+              help="Index from GeneSetWeights to process.")
 )
 
 # Loading parsed arguments
@@ -50,8 +54,8 @@ if(!file.exists(args$annotation_file)){
   stop(paste0("Annotation data: ", args$annotation_file, " does not exist."))
 }
 
-if(!file.exists(args$pathway_availability_file)){
-  stop(paste0("Pathway Availability data: ", args$pathway_availability_file, " does not exist."))
+if(!file.exists(args$geneSets)){
+  stop(paste0("Gene Set data: ", args$geneSets, " does not exist."))
 }
 
 
@@ -59,7 +63,7 @@ if(!dir.exists(args$temp_folder)){
   dir.create(args$temp_folder)
 }
 
-pathways <- fread(args$pathway_availability_file)
+geneSets <- fread(args$geneSets)
 
 annotations <- fread(args$annotation_file, header = FALSE)
 
@@ -85,17 +89,17 @@ File.Fam <- paste0(args$genotype_data, ".fam")
 bim_data <- fread(File.Bim)[, c(1,4,2)]
 colnames(bim_data) <- c("chr", "loc", "rs_id")
 
-if(dir.exists("PathwayWeights")){
-  full_list <- list.dirs("PathwayWeights", recursive = FALSE, full.names = FALSE)
+if(dir.exists("GeneSetWeights")){
+  full_list <- list.dirs("GeneSetWeights", recursive = FALSE, full.names = FALSE)
 }else{
-  stop("PathwayWeights do not exist!")
+  stop("GeneSetWeights do not exist!")
 }
 
 all_results <- c()
 
 full_list <- sort(full_list)
 
-d <- full_list[args$pathway_index]
+d <- full_list[args$geneSet_index]
 
 print(paste0("Currently working on ", d, "..."))
 
@@ -103,7 +107,7 @@ if(!dir.exists(paste0(args$temp_folder, "/", d))){
   dir.create(paste0(args$temp_folder, "/", d), recursive = TRUE)
 }
 
-curr_genes <- str_split(pathways$All_Genes[pathways$PathwayID == str_split(d, "_")[[1]][2]], ";")[[1]]
+curr_genes <- str_split(geneSets$Genes[geneSets$GeneSet == str_split(d, "_")[[1]][2]], ";")[[1]]
 
 gene_details <- mappings[mappings$gene_name %in% curr_genes,]
 
@@ -111,7 +115,7 @@ gene_details$chromosome <- as.integer(gene_details$chromosome)
 gene_details$start <- pmax(gene_details$start - args$cisBP, 0)
 gene_details$end <- gene_details$end + args$cisBP
 
-file_list <- list.files(paste0("PathwayWeights/", d, "/"))
+file_list <- list.files(paste0("GeneSetWeights/", d, "/"))
 file_list <- str_replace(file_list, "EMMAX.*_", "")
 file_list <- str_replace(file_list, ".top", "")
 nums <- str_replace(file_list, "V", "")
@@ -123,7 +127,7 @@ for(comp in file_list){
 }
 
 for(n in nums){
-  curr_results <- fread(paste0("PathwayWeights/", d, "/EMMAX.", (as.numeric(n)-1), "_V", n, ".top"), skip = "#chr")
+  curr_results <- fread(paste0("GeneSetWeights/", d, "/EMMAX.", (as.numeric(n)-1), "_V", n, ".top"), skip = "#chr")
   curr_results <- curr_results[curr_results$pvalue <= args$alpha_val,]
   
   if(nrow(curr_results)==0){
@@ -131,11 +135,17 @@ for(n in nums){
     next
   }
   
-  curr_results <- curr_results[, 1:3]
-  colnames(curr_results) <- c("chr", "loc", "weight")
-  min_v <- min(curr_results$weight[curr_results$weight != 0])
-  curr_results$weight[curr_results$weight == 0] <- min_v/2
-  curr_results$weight <- -log10(curr_results$weight)
+  if(args$weight_type == "p"){
+    curr_results <- curr_results[, 1:3]
+    colnames(curr_results) <- c("chr", "loc", "weight")
+    min_v <- min(curr_results$weight[curr_results$weight != 0])
+    curr_results$weight[curr_results$weight == 0] <- min_v/2
+    curr_results$weight <- -log10(curr_results$weight)
+  }else{
+    curr_results <- curr_results[, c(1,2,5)]
+    colnames(curr_results) <- c("chr", "loc", "weight")
+  }
+
   curr_results <- merge(curr_results, bim_data, by = c("chr", "loc"))
   
   if(nrow(curr_results)==0){
@@ -157,7 +167,7 @@ for(n in nums){
   curr_SNP_set <- output[, c("gene_name", "rs_id")]
   fwrite(curr_SNP_set, paste0(args$temp_folder, "/", d, "/V", n, "/Snp.Sets.txt"), col.names = FALSE, sep = "\t")
   
-  print(paste0("Running SKAT for compnent ", n, " of ", d, "..."))
+  print(paste0("Running SKAT for component ", n, " of ", d, "..."))
   File.SetID <- paste0(args$temp_folder, "/", d, "/V", n, "/Snp.Sets.txt")
   File.SSD <- paste0(args$temp_folder, "/", d, "/V", n, "/temp.SSD")
   File.Info <- paste0(args$temp_folder, "/", d, "/V", n, "/temp.SSD.Info")
@@ -176,7 +186,7 @@ for(n in nums){
   
   curr_results <- as.data.table(out$results)
   
-  curr_results$pathway <- str_split(d, "_")[[1]][2]
+  curr_results$geneSet <- str_split(d, "_")[[1]][2]
   curr_results$method <- str_split(d, "_")[[1]][1]
   curr_results$num_snp_sets <- length(unique(SnpSets$V1))
   curr_results$method_comp <- paste0(n)
